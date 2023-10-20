@@ -1,0 +1,12 @@
+{"version": 6,
+ "packagesDir": "lake-packages",
+ "packages":
+ [{"git":
+   {"url": "https://github.com/tydeu/lean4-alloy.git",
+    "subDir?": null,
+    "rev": "e36ce099943c6813d957647b523ce97be7d8939c",
+    "opts": {},
+    "name": "alloy",
+    "inputRev?": null,
+    "inherited": false}}],
+ "name": "libuv"}
