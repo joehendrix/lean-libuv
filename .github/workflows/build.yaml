@@ -8,31 +8,76 @@ jobs:
       strategy:
         fail-fast: false
         matrix:
-          os: [ubuntu-latest, macos-latest]
-      runs-on: ubuntu-latest
+          os: [windows-latest] # ubuntu-latest, macos-latest,
+          libuv: [v1.46.0]
+      runs-on: ${{ matrix.os }}
       steps:
-        - name: install elan
+        - name: Prereqs Ubuntu
+          if: matrix.os == 'ubuntu-latest'
           run: |
             set -o pipefail
             curl -sSfL https://github.com/leanprover/elan/releases/download/v1.4.2/elan-x86_64-unknown-linux-gnu.tar.gz | tar xz
             ./elan-init -y --default-toolchain none
             echo "$HOME/.elan/bin" >> $GITHUB_PATH
-        - uses: actions/checkout@v4
-        - name: Install libuv (ubuntu)
-          run: |
             sudo apt-get update
             sudo apt-get install -y --no-install-recommends libuv1-dev clang
             sudo update-alternatives --set cc /usr/bin/clang
-          if: matrix.os == 'ubuntu-latest'
         - name: Set up Homebrew
           uses: Homebrew/actions/setup-homebrew@master
           if: matrix.os == 'macos-latest'
-        - name: Install libuv (osx)
-          run: brew install libuv pkg-config
+        - name: Prereqs OSX
           if: matrix.os == 'macos-latest'
-        - name: Lake build
+          run: brew install elan-init libuv pkg-config
+        - name: Add msys2 to path
+          if: matrix.os == 'windows-latest'
           run: |
-            which cc
-            ls -l $(which cc)
-
-            lake build --verbose
+            Add-Content $env:GITHUB_PATH "C:\msys64\usr\bin"
+            Add-Content $env:GITHUB_PATH "C:\msys64\mingw64\bin"
+            Set-Content $env:GITHUB_ENV  "PKG_CONFIG_PATH=C:\msys64\usr\lib\pkgconfig"
+        - name: System32 contents
+          shell: bash
+          run: find $(cygpath -u "C:\Windows\System32")
+        - name: Install gcc
+          if: matrix.os == 'windows-latest'
+          run: pacman -v -S --noconfirm mingw-w64-x86_64-gcc mingw-w64-x86_64-pkg-config
+        - name: Build libuv
+          if: matrix.os == 'windows-latest'
+          shell: bash
+          run: |
+            curl https://dist.libuv.org/dist/${{ matrix.libuv }}/libuv-${{ matrix.libuv }}.tar.gz | tar xvz
+            cmake -S libuv-${{ matrix.libuv }} -B build -DBUILD_TESTING=OFF
+            cmake --build build
+        - name: Inspect libuv
+          if: matrix.os == 'windows-latest'
+          shell: bash
+          run: |
+            find build
+        - name: Modify libuv
+          if: matrix.os == 'windows-latest'
+          shell: bash
+          run: |
+            cat build/libuv.pc
+            sed -i 's/Libs:/Libs:\-LC:\/Windows\/system32/' build/libuv.pc
+            sed -i 's/ -luuid/ -lmsvcrt/' build/libuv.pc
+            cat build/libuv.pc
+        - name: Install libuv
+          if: matrix.os == 'windows-latest'
+          shell: bash
+          run: |
+            # For some reason install needs dll from release.
+            cp -r build/Debug build/Release
+            cmake --install build --prefix=/usr
+        - name: LibUV contents
+          shell: bash
+          run: pkg-config --libs libuv
+        - name: Install Elan (Windows)
+          if: matrix.os == 'windows-latest'
+          shell: bash
+          run: |
+            echo "$SHELL"
+            cygpath -w /usr/bin
+            curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh -s -- -y --default-toolchain none
+            echo "$USERPROFILE\.elan\bin" >> $GITHUB_PATH
+        - uses: actions/checkout@v4
+        - name: Lake build
+          run: lake build --verbose
