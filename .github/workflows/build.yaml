@@ -1,0 +1,38 @@
+on: [push, pull_request]
+
+name: ci
+
+jobs:
+    build:
+      name: Build
+      strategy:
+        fail-fast: false
+        matrix:
+          os: [ubuntu-latest, macos-latest]
+      runs-on: ubuntu-latest
+      steps:
+        - name: install elan
+          run: |
+            set -o pipefail
+            curl -sSfL https://github.com/leanprover/elan/releases/download/v1.4.2/elan-x86_64-unknown-linux-gnu.tar.gz | tar xz
+            ./elan-init -y --default-toolchain none
+            echo "$HOME/.elan/bin" >> $GITHUB_PATH
+        - uses: actions/checkout@v4
+        - name: Install libuv (ubuntu)
+          run: |
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends libuv1-dev clang
+            sudo update-alternatives --set cc /usr/bin/clang
+          if: matrix.os == 'ubuntu-latest'
+        - name: Set up Homebrew
+          uses: Homebrew/actions/setup-homebrew@master
+          if: matrix.os == 'macos-latest'
+        - name: Install libuv (osx)
+          run: brew install libuv pkg-config
+          if: matrix.os == 'macos-latest'
+        - name: Lake build
+          run: |
+            which cc
+            ls -l $(which cc)
+
+            lake build --verbose
