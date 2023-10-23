@@ -4,9 +4,9 @@
  [{"git":
    {"url": "https://github.com/tydeu/lean4-alloy.git",
     "subDir?": null,
-    "rev": "e36ce099943c6813d957647b523ce97be7d8939c",
+    "rev": "3dfe3ef408faa860e4c75504fe51503b56e9adc4",
     "opts": {},
     "name": "alloy",
     "inputRev?": null,
     "inherited": false}}],
- "name": "libuv"}
+ "name": "LibUV"}
