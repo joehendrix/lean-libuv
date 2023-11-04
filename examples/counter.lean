@@ -6,7 +6,7 @@ This is a Lean implementation of `idle-basic/main.c` with a smaller counter in
 -/
 import LibUV
 
-def fatalError (msg:String): IO Unit := do
+def fatalError (msg:String) : IO Unit := do
   IO.eprintln msg
   (← IO.getStderr).flush
   IO.Process.exit 1
@@ -14,7 +14,7 @@ def fatalError (msg:String): IO Unit := do
 def main : IO Unit := do
   let l ← UV.mkLoop
   let counter ← IO.mkRef 0
-  let idle ← UV.mkIdle l
+  let idle ← l.mkIdle
   let stop := 7
   idle.start fun h => do
     counter.modify (λc => c + 1)
