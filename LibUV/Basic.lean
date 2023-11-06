@@ -373,18 +373,6 @@ static void check_close_cb(lean_uv_check_t* check) {
 static void Check_finalize(void* ptr) {
   uv_close((uv_handle_t*) ptr, (uv_close_cb) &check_close_cb);
 }
-
-static void check_invoke_callback(lean_uv_check_t* check) {
-  // Get callback and handler objects
-  lean_object* cb = *check_callback(check);
-  lean_object* o = *handle_object(check_handle(check));
-  // Increment reference counts to both prior to application.
-  lean_inc(cb);
-  lean_inc(o);
-  // Invoke and discard result.
-  lean_dec(lean_apply_2(cb, o, lean_box(0)));
-}
-
 end
 
 alloy c extern_type Check => lean_uv_check_t := {
@@ -401,6 +389,21 @@ def Loop.mkCheck (loop : Loop) : BaseIO Check := {
   uv_check_init(of_lean<Loop>(loop), &check->uv);
   return lean_io_result_mk_ok(r);
 }
+
+alloy c section
+
+static void check_invoke_callback(lean_uv_check_t* check) {
+  // Get callback and handler objects
+  lean_object* cb = *check_callback(check);
+  lean_object* o = *handle_object(check_handle(check));
+  // Increment reference counts to both prior to application.
+  lean_inc(cb);
+  lean_inc(o);
+  // Invoke and discard result.
+  lean_dec(lean_apply_2(cb, o, lean_box(0)));
+}
+
+end
 
 /--
 Start invoking the callback on the loop.
@@ -426,12 +429,53 @@ def Check.stop (h : @&Check) : BaseIO Unit := {
 
 end Check
 
+section TCP
+
+alloy c section
+
+struct lean_uv_tcp_s {
+  uv_tcp_t uv;
+//  lean_object* callback; // Object referecing method to call.
+};
+
+typedef struct lean_uv_tcp_s lean_uv_tcp_t;
+
+/* Return lean object representing this check */
+static uv_handle_t* tcp_handle(lean_uv_tcp_t* p) {
+  return (uv_handle_t*) &(p->uv);
+}
+
+
+static void TCP_foreach(void* ptr, b_lean_obj_arg f) {
+  lean_uv_tcp_t* tcp = (lean_uv_tcp_t*) ptr;
+  //lean_apply_1(f, *check_callback(check));
+}
+
+static void tcp_close_cb(lean_uv_tcp_t* tcp) {
+  //lean_dec(*check_callback(check));
+  free_handle(tcp_handle(tcp));
+}
+
+static void TCP_finalize(void* ptr) {
+  lean_uv_tcp_t* tcp = (lean_uv_tcp_t*) ptr;
+  uv_close(tcp_handle(tcp), (uv_close_cb) &tcp_close_cb);
+}
+end
+
+alloy c extern_type TCP => lean_uv_tcp_t := {
+  foreach  := `TCP_foreach
+  finalize := `TCP_finalize
+}
+
+end TCP
+
 section Handle
 
 inductive Handle where
   | async : Async -> Handle
   | check : Check -> Handle
   | idle : Idle -> Handle
+  | tcp : TCP -> Handle
 
 alloy c section
 
@@ -443,6 +487,7 @@ static lean_object* lean_uv_handle_rec(
     lean_object* async,
     lean_object* check,
     lean_object* idle,
+    lean_object* tcp,
     lean_object* h) {
   uv_handle_t* hdl = (uv_handle_t *) lean_get_external_data(h);
   switch (hdl->type) {
@@ -452,6 +497,8 @@ static lean_object* lean_uv_handle_rec(
     return lean_apply_1(check, h);
   case UV_IDLE:
     return lean_apply_1(idle, h);
+  case UV_TCP:
+    return lean_apply_1(tcp, h);
   default:
     fatal_error("Unsupported type %d\n", hdl->type);
   }
@@ -462,6 +509,7 @@ end
 attribute [extern "lean_uv_handle_id"] Handle.async
 attribute [extern "lean_uv_handle_id"] Handle.check
 attribute [extern "lean_uv_handle_id"] Handle.idle
+attribute [extern "lean_uv_handle_id"] Handle.tcp
 attribute [extern "lean_uv_handle_rec"] Handle.rec
 
 namespace Handle
