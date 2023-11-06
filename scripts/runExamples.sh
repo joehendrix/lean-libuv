@@ -9,3 +9,4 @@ function runExample {
 }
 
 runExample "examples/counter.lean"
+runExample "examples/phases.lean"
