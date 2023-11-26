@@ -38,5 +38,5 @@ def pkgConfigLibs (lib : String) : IO (Array String) := runPkgConfig #["--libs",
 lean_lib LibUV where
   precompileModules := true
   nativeFacets := #[Module.oFacet, `alloy.c.o]
-  moreLeancArgs := #["-fPIC"] ++ run_io (pkgConfigCFlags "libuv")
+  moreLeancArgs := #["-fPIC", "-Iinclude"] ++ run_io (pkgConfigCFlags "libuv")
   moreLinkArgs  := run_io (pkgConfigLibs   "libuv")
