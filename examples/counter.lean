@@ -17,10 +17,10 @@ def main : IO Unit := do
   let idle ← l.mkIdle
   IO.println s!"Active {←(UV.Handle.idle idle).isActive}"
   let stop := 7
-  idle.start fun h => do
+  idle.start do
     counter.modify (λc => c + 1)
     if (←counter.get) ≥ 7 then
-      h.stop
+      idle.stop
   IO.println s!"Active {←(UV.Handle.idle idle).isActive}"
   IO.println "Idling..."; (←IO.getStdout).flush
   let stillActive ← l.run

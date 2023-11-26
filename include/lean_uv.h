@@ -12,10 +12,9 @@ void fatal_error(const char *format, ...) {
 }
 
 static void* checked_malloc(size_t n) {
-  uv_loop_t* ptr = malloc(n);
-  if (ptr == 0) {
-    fatal_error("Out of memory.\n");
-  }
+  void* ptr = malloc(n);
+  if (ptr == 0)
+    lean_internal_panic_out_of_memory();
   return ptr;
 }
 
@@ -36,7 +35,21 @@ static lean_object* lean_io_unit_result_ok() {
   return r;
 }
 
+struct lean_uv_loop_s {
+  uv_loop_t uv;
+  // An IO error
+  lean_object* io_error;
+};
+
+typedef struct lean_uv_loop_s lean_uv_loop_t;
+
+/** Return the Lean loop object from the */
 static uv_loop_t* of_loop(lean_object* l) {
+  return lean_get_external_data(l);
+}
+
+/** Return the Lean loop object from the */
+static lean_uv_loop_t* of_loop_ext(lean_object* l) {
   return lean_get_external_data(l);
 }
 
@@ -45,6 +58,21 @@ static lean_object** loop_object(uv_loop_t* l) {
   return (lean_object**) &(l->data);
 }
 
+/*
+Check the callback result from a handle.  The callback result should
+have type `IO Unit`.
+*/
+static void check_callback_result(uv_handle_t* h, lean_object* io_result) {
+  if (lean_io_result_is_error(io_result)) {
+    lean_uv_loop_t* l = (lean_uv_loop_t*) h->loop;
+    if (l->io_error == 0) {
+      uv_stop(&l->uv);
+      l->io_error = io_result;
+      return;
+    }
+  }
+  lean_dec(io_result);
+}
 
 /* Return lean object representing this handle */
 static lean_object** handle_object(uv_handle_t* p) {
@@ -55,4 +83,11 @@ static lean_object** handle_object(uv_handle_t* p) {
 static void free_handle(uv_handle_t* handle) {
   lean_dec(*loop_object(handle->loop));
   free(handle);
+}
+
+lean_obj_res lean_uv_raise_invalid_argument(lean_obj_arg msg, lean_obj_arg _s);
+
+static
+lean_obj_res invalid_argument(const char* msg) {
+  return lean_uv_raise_invalid_argument(lean_mk_string(msg), lean_unit());
 }

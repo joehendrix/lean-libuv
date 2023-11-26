@@ -1,4 +1,7 @@
+import LibUV.Async
+import LibUV.Check
 import LibUV.Idle
+import LibUV.Stream
 import LibUV.Timer
 
 open scoped Alloy.C
@@ -9,8 +12,8 @@ namespace UV
 inductive Handle where
   | async : Async -> Handle
   | check : Check -> Handle
-  | idle : Idle -> Handle
-  | tcp : TCP -> Handle
+  | idle  : Idle  -> Handle
+  | tcp   : TCP   -> Handle
   | timer : Timer -> Handle
 
 alloy c section
