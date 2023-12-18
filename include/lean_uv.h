@@ -27,7 +27,7 @@ static lean_object* lean_bool(bool b) {
 }
 
 static lean_object* lean_io_unit_result_ok() {
-  lean_object* r = 0;
+  static lean_object* r = 0;
   if (r == 0) {
     r = lean_io_result_mk_ok(lean_unit());
     lean_mark_persistent(r);
@@ -54,17 +54,17 @@ static lean_uv_loop_t* of_loop_ext(lean_object* l) {
 }
 
 /* Return lean object representing this handle */
-static lean_object** loop_object(uv_loop_t* l) {
-  return (lean_object**) &(l->data);
+static lean_object* loop_object(uv_loop_t* l) {
+  return (lean_object*) l->data;
 }
 
 /*
 Check the callback result from a handle.  The callback result should
 have type `IO Unit`.
 */
-static void check_callback_result(uv_handle_t* h, lean_object* io_result) {
+static void check_callback_result(uv_loop_t* loop, lean_object* io_result) {
   if (lean_io_result_is_error(io_result)) {
-    lean_uv_loop_t* l = (lean_uv_loop_t*) h->loop;
+    lean_uv_loop_t* l = (lean_uv_loop_t*) loop;
     if (l->io_error == 0) {
       uv_stop(&l->uv);
       l->io_error = io_result;
@@ -74,14 +74,16 @@ static void check_callback_result(uv_handle_t* h, lean_object* io_result) {
   lean_dec(io_result);
 }
 
-/* Return lean object representing this handle */
+/*
+All handles use the data field to refer to the handle for it.
+*/
 static lean_object** handle_object(uv_handle_t* p) {
   return (lean_object**) &(p->data);
 }
 
 // This decrements the loop object and frees the handle.
 static void free_handle(uv_handle_t* handle) {
-  lean_dec(*loop_object(handle->loop));
+  lean_dec(loop_object(handle->loop));
   free(handle);
 }
 
@@ -90,4 +92,42 @@ lean_obj_res lean_uv_raise_invalid_argument(lean_obj_arg msg, lean_obj_arg _s);
 static
 lean_obj_res invalid_argument(const char* msg) {
   return lean_uv_raise_invalid_argument(lean_mk_string(msg), lean_unit());
+}
+
+/**
+ * Check that the lean object has not been marked as multi-threaded or persistent.
+ */
+static
+void lean_uv_check_st(lean_object* o) {
+  if (!lean_is_st(o)) {
+    if (lean_is_persistent(o)) {
+      fatal_error("libuv objects cannot be marked as persistent.");
+    } else {
+      fatal_error("libuv objects cannot be shared across tasks.");
+    }
+  }
+}
+
+__attribute__((noreturn))
+void fatal_st_only(const char *name) {
+  fatal_error("%s cannot be made multi-threaded or persistent.", name);
+}
+
+lean_object* lean_uv_io_error(int err);
+
+/*
+This struct contains callbacks used by the stream API.
+
+See "uv_stream_t implementation note" above for more information.
+*/
+struct lean_stream_callbacks_s {
+  lean_object* listen_callback; // Object referencing method to call.
+  lean_object* read_callback; // Object referencing method to call.
+};
+
+typedef struct lean_stream_callbacks_s lean_stream_callbacks_t;
+
+static void* lean_stream_base(uv_handle_t* h) {
+  lean_stream_callbacks_t* op = (lean_stream_callbacks_t*) h;
+  return (op - 1);
 }

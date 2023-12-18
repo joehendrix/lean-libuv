@@ -1,4 +1,3 @@
-import LibUV.Async
 import LibUV.Check
 import LibUV.Idle
 import LibUV.Stream
@@ -10,7 +9,6 @@ alloy c include <stdlib.h> <uv.h> <lean/lean.h> <lean_uv.h>
 namespace UV
 
 inductive Handle where
-  | async : Async -> Handle
   | check : Check -> Handle
   | idle  : Idle  -> Handle
   | tcp   : TCP   -> Handle
@@ -23,7 +21,6 @@ extern lean_object* lean_uv_handle_id(lean_object* h) {
 }
 
 static lean_object* lean_uv_handle_rec(
-    lean_object* async,
     lean_object* check,
     lean_object* idle,
     lean_object* tcp,
@@ -31,8 +28,6 @@ static lean_object* lean_uv_handle_rec(
     lean_object* h) {
   uv_handle_t* hdl = (uv_handle_t *) lean_get_external_data(h);
   switch (hdl->type) {
-  case  UV_ASYNC:
-    return lean_apply_1(async, h);
   case  UV_CHECK:
     return lean_apply_1(check, h);
   case UV_IDLE:
@@ -48,7 +43,6 @@ static lean_object* lean_uv_handle_rec(
 
 end
 
-attribute [extern "lean_uv_handle_id"] Handle.async
 attribute [extern "lean_uv_handle_id"] Handle.check
 attribute [extern "lean_uv_handle_id"] Handle.idle
 attribute [extern "lean_uv_handle_id"] Handle.tcp

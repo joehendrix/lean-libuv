@@ -1,6 +1,10 @@
 import LibUV.Loop
 
 open scoped Alloy.C
+alloy c include <stdlib.h> <lean_uv.h>
+
+section NonemptyProp
+
 
 def NonemptyProp := Subtype fun α : Prop => Nonempty α
 
@@ -9,54 +13,43 @@ instance : Inhabited NonemptyProp := ⟨⟨PUnit, ⟨⟨⟩⟩⟩⟩
 /-- The underlying type of a `NonemptyType`. -/
 abbrev NonemptyProp.type (type : NonemptyProp) : Prop := type.val
 
-alloy c include <stdlib.h> <lean_uv.h>
+end NonemptyProp
 
 namespace UV
 
-section Stream
+section StreamDeclaration
 
-opaque Stream.nonemptyProp (α : Type) : NonemptyProp
+private opaque Stream.nonemptyProp (α : Type) : NonemptyProp
 
+/--
+The Lean `Stream` class is a marker class that holds for LibUV types
+that are stream objects.
+-/
 class Stream (α: Type) : Prop where
   phantom : NonemptyProp.type (Stream.nonemptyProp α)
 
+/---
+Stream implementation note.
+
+As noted in the README implementation notes, the stream API closures are
+stored before the `uv_handle_t` pointer.  This is implemented in a
+struct `lean_stream_callbacks_t` that is stored before the `uv_stream_t`
+struct and it can be obtained via `stream_callbacks` defined below.
+
+All types that implement the `Stream` typeclass must respect this memory
+layout so that we can create polymorphic stream operations.
+-/
 instance : Nonempty (Stream α) :=
   match (Stream.nonemptyProp α).property with
-  | Nonempty.intro v => Nonempty.intro { phantom := v }
+  | Nonempty.intro v => Nonempty.intro (Stream.mk v)
 
 namespace Stream
 
 alloy c section
 
-/*
-This struct contains callbacks used by the stream API.
-
-All UV stream operations contain a pointer to a `uv_stream_t`
-that is preceded in memory by lean_stream_callback_s.
-*/
-struct lean_stream_callbacks_s {
-  lean_object* listen_callback; // Object referencing method to call.
-  lean_object* read_callback; // Object referencing method to call.
-};
-
-typedef struct lean_stream_callbacks_s lean_stream_callbacks_t;
 
 void init_stream_callbacks(lean_stream_callbacks_t* cbs) {
   memset(cbs, 0, sizeof(lean_stream_callbacks_t));
-}
-
-static void stream_foreach(lean_stream_callbacks_t* callbacks, b_lean_obj_arg f) {
-  if (callbacks->listen_callback != 0)
-    lean_apply_1(f, callbacks->listen_callback);
-  if (callbacks->read_callback != 0)
-    lean_apply_1(f, callbacks->read_callback);
-}
-
-static void stream_close(lean_stream_callbacks_t* callbacks) {
-  if (callbacks->listen_callback != 0)
-    lean_dec(callbacks->listen_callback);
-  if (callbacks->read_callback != 0)
-    lean_dec(callbacks->read_callback);
 }
 
 static inline
@@ -64,38 +57,170 @@ lean_stream_callbacks_t* stream_callbacks(uv_stream_t* stream) {
   return ((lean_stream_callbacks_t*) stream) - 1;
 }
 
-static void listen_callback(uv_stream_t* server, int status) {
-  printf("listen_callback(%p, %d)\n", server, status);
-  if (status != 0)
-    fatal_error("listen callback status = 0");
-  // Get callback and idler handler objects
-  lean_object* cb = stream_callbacks(server)->listen_callback;
-  lean_inc(cb);
-  lean_dec(lean_apply_1(cb, lean_box(0)));
+end
+
+end Stream
+end StreamDeclaration
+
+section Shutdown
+
+alloy c section
+/*
+The external data of a ShutdownReq in Lean is a lean_uv_shutdown_t req where:
+
+  req.uv.handle is a pointer to a uv_stream_t.
+  req.uv.data is a pointer to the Lean shutdown_req object.  This is set
+    to null if the shutdown request memory is released.
+  req.callback is a pointer to the callback to invoke when the shutdown
+  completes.  This is set to null after the callback returns.
+*/
+struct lean_uv_shutdown_s {
+  uv_shutdown_t uv;
+  lean_object* callback;
+};
+
+typedef struct lean_uv_shutdown_s lean_uv_shutdown_t;
+
+static void Shutdown_foreach(void* ptr, b_lean_obj_arg f) {
+  fatal_st_only("ShutdownReq");
 }
 
-lean_object* lean_uv_listen(lean_object* server, uint32_t backlog, lean_object* cb) {
-  uv_stream_t* stream = lean_get_external_data(server);
-  printf("stream listen(%p, %d)\n", stream, backlog);
-  lean_stream_callbacks_t* cbs = stream_callbacks(stream);
-  if (cbs->listen_callback)
-    fatal_error("listen already called.\n");
-  cbs->listen_callback = cb;
-  int err = uv_listen(stream, backlog, &listen_callback);
-  if (err < 0)
-    fatal_error("uv_listen failed (error = %d).\n", err);
-  return lean_io_unit_result_ok();
+static void Shutdown_finalize(void* ptr) {
+  lean_uv_shutdown_t* req = (lean_uv_shutdown_t*) ptr;
+  // Release counter on handle.
+  lean_dec_ref(req->uv.handle->data);
+  if (req->callback) {
+    req->uv.data = 0;
+  } else {
+    free(req);
+  }
 }
 
-lean_object* lean_uv_accept(lean_object* server_obj, lean_object* client_obj) {
-  uv_stream_t* server = lean_get_external_data(server_obj);
-  uv_stream_t* client = lean_get_external_data(client_obj);
-  int err = uv_accept(server, client);
+static lean_external_class * shutdown_class = NULL;
+
+static void shutdown_cb(uv_shutdown_t *req, int status) {
+  lean_object* success = lean_bool(status == 0);
+  lean_uv_shutdown_t* lreq = (lean_uv_shutdown_t*) req;
+
+  uv_loop_t* loop = req->handle->loop;
+
+  lean_object* cb = lreq->callback;
+  // If the request object has been freed, then we can free the request
+  // object as well.
+  if (lreq->uv.data) {
+    lreq->callback = 0;
+  } else {
+    free(lreq);
+  }
+  // N.B. We intentionally have not incremented reference count to
+  // `cb` so it may get finalized when returning from lean_apply.
+  check_callback_result(loop, lean_apply_1(cb, success));
+}
+end
+
+/-- References -/
+opaque ShutdownReqPointed : NonemptyType.{0}
+
+/--
+A shutdown rewquest
+-/
+structure ShutdownReq (α : Type) : Type where
+  ref : ShutdownReqPointed.type
+
+instance : Nonempty (ShutdownReq α) :=
+  Nonempty.intro { ref := Classical.choice ShutdownReqPointed.property }
+
+namespace ShutdownReq
+
+/--
+This returns the handle associated with the shutdown request.
+-/
+@[extern "lean_uv_shutdown_req_handle"]
+opaque handle [Inhabited α] (req : @&ShutdownReq α) : α
+
+alloy c section
+lean_obj_res lean_uv_shutdown_req_handle(b_lean_obj_arg reqObj, b_lean_obj_arg _rw) {
+  lean_uv_shutdown_t* req = lean_get_external_data(reqObj);
+  lean_object* hdl = req->uv.handle->data;
+  lean_inc(hdl);
+  return hdl;
+}
+end
+
+end ShutdownReq
+
+namespace Stream
+/--
+Shutdown the outgoing (write) side of a duplex stream.
+It waits for pending write requests to complete.
+The cb is called after shutdown is complete.
+-/
+@[extern "lean_uv_shutdown"]
+opaque shutdown [Stream α] (handle : α) (cb : Bool → BaseIO Unit) : UV.IO (ShutdownReq α)
+
+alloy c section
+lean_obj_res lean_uv_shutdown(lean_obj_arg handle, lean_obj_arg cb, b_lean_obj_arg _rw) {
+  uv_stream_t* hdl = lean_get_external_data(handle);
+  lean_uv_shutdown_t* req = malloc(sizeof(lean_uv_shutdown_t));
+  req->callback = cb;
+
+  if (shutdown_class == NULL) {
+    shutdown_class = lean_register_external_class(Shutdown_finalize, Shutdown_foreach);
+  }
+  lean_object* reqObj = lean_alloc_external(shutdown_class, req);
+  req->uv.data = reqObj;
+  int ec = uv_shutdown(&req->uv, hdl, &shutdown_cb);
+  if (ec < 0) {
+    // Release callback
+    lean_dec(cb);
+    req->callback = 0;
+    // Make sure handle is initialized to avoid special case in Shutdown_finalize.
+    req->uv.handle = hdl;
+    // This will free reqObj and decrement hdl and then free reqObj and req.
+    lean_free_object(reqObj);
+    fatal_error("uv_shutdown_req failed (error = %d)", ec);
+  }
+  return lean_io_result_mk_ok(reqObj);
+}
+
+end
+
+end Stream
+end Shutdown
+
+namespace Stream
+
+opaque ConnectReq (α : Type) : Type
+
+opaque WriteReq : Type
+
+
+@[extern "lean_uv_accept"]
+opaque accept [Stream α] [Stream β] (server : α) (client : β) : BaseIO Unit
+
+alloy c section
+lean_obj_res lean_uv_accept(b_lean_obj_arg server, lean_obj_arg client) {
+  // FIXME.  Ensure accept can be called.
+  uv_stream_t* uv_server = lean_get_external_data(server);
+  uv_stream_t* uv_client = lean_get_external_data(client);
+  int err = uv_accept(uv_server, uv_client);
   if (err < 0)
     fatal_error("uv_accept failed (error = %d).\n", err);
   return lean_io_unit_result_ok();
 }
+end
 
+/--
+This starts reading data from the stream by invoking the callback when data is
+available.
+
+It throws `EALREADY` if a reader is already reading from the stream and `EINVAL
+if the stream is closing.
+-/
+@[extern "lean_uv_read_start"]
+opaque read_start [Stream α] (stream : α) (callback : ByteArray -> BaseIO Unit) : UV.IO Unit
+
+alloy c section
 static
 void alloc_callback(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf) {
   lean_object* sarray = lean_alloc_sarray(1, 0, suggested_size);
@@ -113,49 +238,64 @@ void read_callback(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
   lean_dec(lean_apply_2(cb, array_obj, lean_box(0)));
 }
 
-static
 lean_object* lean_uv_read_start(lean_object* stream_obj, lean_object* cb) {
   uv_stream_t* stream = lean_get_external_data(stream_obj);
   lean_stream_callbacks_t* cbs = stream_callbacks(stream);
-  if (cbs->read_callback)
-    fatal_error("read_start already called.\n");
+  if (cbs->read_callback) {
+    lean_dec(stream_obj);
+    lean_dec(cb);
+    return lean_uv_io_error(UV_EALREADY);
+  }
   cbs->read_callback = cb;
   int err = uv_read_start(stream, &alloc_callback, &read_callback);
-  if (err < 0)
-    fatal_error("uv_read_start failed (error = %d).\n", err);
+  if (err < 0) {
+    lean_dec(stream_obj);
+    lean_dec(cb);
+    return lean_uv_io_error(err);
+  }
   return lean_io_unit_result_ok();
 }
-
-static
-lean_object* lean_uv_read_stop(lean_object* stream_obj) {
-  uv_stream_t* stream = lean_get_external_data(stream_obj);
-  int err = uv_read_stop(stream);
-  if (err < 0)
-    fatal_error("uv_read_stop failed (error = %d).\n", err);
-  lean_stream_callbacks_t* cbs = stream_callbacks(stream);
-  cbs->read_callback = 0;
-  return lean_io_unit_result_ok();
-}
-
 end
 
-@[extern "lean_uv_listen"]
-opaque listen {α : Type} [Stream α]
-  (server : α) (backlog : UInt32) (cb : BaseIO Unit): BaseIO Unit
+/--
+This stops reading data from the stream.
 
-@[extern "lean_uv_accept"]
-opaque accept {α β : Type} [Stream α] [Stream β]
-  (server : α) (client : β) : BaseIO Unit
+It always succeeds even if data is not being read from stream.
+-/
+@[extern "lean_uv_read_stop"]
+opaque read_stop [Stream α] (stream : α) : BaseIO Unit
 
-@[extern "lean_uv_read_start"]
-opaque read_start {α : Type} [Stream α]
-  (stream : α) (callback : ByteArray -> BaseIO Unit) : BaseIO Unit
+alloy c section
+lean_object* lean_uv_read_stop(lean_object* stream_obj) {
+  uv_stream_t* stream = lean_get_external_data(stream_obj);
 
-@[extern "lean_uv_read_sop"]
-opaque read_stop {α : Type} [Stream α]
-  (stream : α) : BaseIO Unit
+  // Only need to do things if stream is active.
+  if (uv_is_active((uv_handle_t*) stream)) {
+    uv_read_stop(stream);
 
-end Stream
+    // Clear stream read callback.
+    lean_stream_callbacks_t* cbs = stream_callbacks(stream);
+    if (cbs->read_callback) {
+      lean_dec(cbs->read_callback);
+      cbs->read_callback = 0;
+    }
+
+    // If stream is no longer active, release it from implicit ownership by loop.
+    if (!uv_is_active((uv_handle_t*) stream)) {
+      lean_dec(stream_obj);
+    }
+  }
+
+  // Release stream object
+  lean_dec(stream_obj);
+  return lean_io_unit_result_ok();
+}
+end
+
+/-
+@[extern "lean_uv_write"]
+opaque write [Stream α] (stream : α) : BaseIO Unit
+-/
 
 end Stream
 
@@ -166,9 +306,6 @@ alloy c section
 static void SockAddr_foreach(void* ptr, b_lean_obj_arg f) {
 }
 
-static void SockAddr_finalize(void* ptr) {
-  free(ptr);
-}
 end
 
 /--
@@ -235,17 +372,22 @@ static uv_handle_t* tcp_handle(lean_uv_tcp_t* p) {
 }
 
 static void TCP_foreach(void* ptr, b_lean_obj_arg f) {
-  lean_uv_tcp_t* tcp = tcp_from_handle((uv_handle_t*) ptr);
-  stream_foreach(&tcp->callbacks, f);
+  fatal_st_only("TCP");
 }
 
 static void tcp_close_cb(uv_handle_t* h) {
   lean_uv_tcp_t* tcp = tcp_from_handle(h);
-  stream_close(&tcp->callbacks);
+  lean_stream_callbacks_t* callbacks = &tcp->callbacks;
+  if (callbacks->listen_callback != 0)
+    lean_dec(callbacks->listen_callback);
   free_handle(h);
 }
 
 static void TCP_finalize(void* ptr) {
+  lean_uv_tcp_t* tcp = tcp_from_handle(ptr);
+  lean_stream_callbacks_t* callbacks = &tcp->callbacks;
+  if (callbacks->read_callback != 0)
+    lean_dec(callbacks->read_callback);
   uv_close((uv_handle_t*) ptr, &tcp_close_cb);
 }
 
@@ -275,7 +417,6 @@ instance : Stream TCP := instStreamTCP
 
 alloy c extern "lean_uv_tcp_bind"
 def bind (tcp : TCP) (addr : SockAddr) : BaseIO Unit := {
-  printf("bind(hdl = %p, %p)\n", lean_get_external_data(tcp), addr);
   int err = uv_tcp_bind(lean_get_external_data(tcp), of_lean<SockAddr>(addr), 0);
   if (err != 0) {
     fatal_error("uv_tcp_bind failed (error = %d)\n", err);
@@ -283,13 +424,13 @@ def bind (tcp : TCP) (addr : SockAddr) : BaseIO Unit := {
   return lean_io_unit_result_ok();
 }
 
-def listen (tcp : TCP) (backlog : UInt32) (cb : BaseIO Unit) : BaseIO Unit :=
-  Stream.listen tcp backlog cb
+--def listen (tcp : TCP) (backlog : UInt32) (cb : BaseIO Unit) : UV.IO Unit :=
+--  Stream.listen tcp backlog cb
 
 def accept (server : TCP) (client : TCP) : BaseIO Unit :=
   Stream.accept server client
 
-def read_start (tcp : TCP) (callback : ByteArray -> BaseIO Unit) : BaseIO Unit :=
+def read_start (tcp : TCP) (callback : ByteArray -> BaseIO Unit) : UV.IO Unit :=
   Stream.read_start tcp callback
 
 def read_stop (tcp : TCP) : BaseIO Unit := Stream.read_stop tcp

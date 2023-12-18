@@ -5,8 +5,57 @@ alloy c include <lean_uv.h>
 
 namespace UV
 
+alloy c enum
+  ErrorCode => int
+  | EALREADY => UV_EALREADY
+  | EINVAL   => UV_EINVAL
+  deriving Inhabited, Repr
 
-private def EINVAL : UInt32 := 22
+protected inductive Error where
+| errorcode : ErrorCode → UV.Error
+| user : String → UV.Error
+
+attribute [export lean_uv_error_errorcode] UV.Error.errorcode
+
+alloy c section
+lean_object* lean_uv_error_errorcode(lean_object* err);
+
+/* Returns an IO error for the given error code. */
+lean_object* lean_uv_io_error(int err) {
+  lean_object* r = lean_box(to_lean<ErrorCode>(err));
+  r = lean_uv_error_errorcode(r);
+  return lean_io_result_mk_error(r);
+}
+
+end
+
+
+@[reducible]
+protected def IO := EIO UV.Error
+
+protected def IO.run (act : UV.IO α) : IO α := do
+  match ← act.toBaseIO with
+  | .error (.errorcode e) => dbg_trace "A" throw (IO.userError s!"UV.IO failed (error = {repr e})")
+  | .error (.user msg) => dbg_trace "B" throw (IO.userError msg)
+  | .ok r => dbg_trace "C" pure r
+
+protected opaque log (s : @& String) : UV.IO Unit := do
+  (IO.println s).toBaseIO >>= fun _ => pure ()
+
+protected def fatal {α} (msg : String) : UV.IO α :=
+  (throw (.user msg) : EIO UV.Error α)
+
+structure Ref (α : Type) where
+  val : IO.Ref α
+
+protected def mkRef (a:α) : UV.IO (Ref α) :=
+  Ref.mk <$> IO.mkRef a
+
+protected def Ref.get (r:Ref α) : UV.IO α := r.val.get
+
+protected def Ref.set (r:Ref α) (v : α) : UV.IO Unit := r.val.set v
+
+protected def Ref.modify (r:Ref α) (f : α → α): UV.IO Unit := r.val.modify f
 
 /--
 Report an error that occurred because a function was passed an argument
@@ -16,26 +65,53 @@ These always represent program bugs.  The function condition could have
 been checked beforehand.
 -/
 @[export lean_uv_raise_invalid_argument]
-private def raiseInvalidArgument (message:String) : IO Unit :=
-  throw <| IO.Error.invalidArgument none EINVAL message
+private def raiseInvalidArgument (message:String) : UV.IO α :=
+  throw (.errorcode ErrorCode.EINVAL)
 
 alloy c section
 
-static void Loop_foreach(void* ptr, b_lean_obj_arg f) {
+static void close_stream(uv_handle_t* h) {
+  free(lean_stream_base(h));
+}
+
+static void stop_handles(uv_handle_t* h, void* arg) {
+  switch (h->type) {
+  case UV_NAMED_PIPE:
+  case UV_TCP:
+  case UV_TTY:
+    uv_close(h, &close_stream);
+    break;
+  default:
+    uv_close(h, (uv_close_cb) &free);
+    break;
+  }
 }
 
 static void Loop_finalize(void* ptr) {
-  uv_loop_t* l = (uv_loop_t*) ptr;
-  int err = uv_loop_close(l);
-  if (err < 0)
-    fatal_error("libuv loop finalize called before resources free.\n");
-  free(ptr);
+  uv_loop_t* loop = (uv_loop_t*) ptr;
+  int err = uv_loop_close(loop);
+  if (err == UV_EBUSY) {
+    uv_walk(loop, &stop_handles, 0);
+    err = uv_run(loop, UV_RUN_NOWAIT);
+    if (err != 0) {
+      fatal_error("libuv loop has active handles after stopping.\n");
+    }
+    err = uv_loop_close(loop);
+    if (err != 0) {
+      fatal_error("libuv uv_loop_close failed with %d.\n", err);
+    }
+    free(ptr);
+  } else if (err >= 0) {
+    free(ptr);
+  } else {
+    fatal_error("uv_loop_close returned unexpected value (err = %d)\n", err);
+  }
 }
 
 end
 
 alloy c extern_type Loop => lean_uv_loop_t := {
-  foreach := `Loop_foreach
+  foreach := `lean_uv_null_foreach
   finalize := `Loop_finalize
 }
 
@@ -60,7 +136,7 @@ def mkLoop (options : Loop.Options := {}) : BaseIO Loop := {
   if (err < 0)
     fatal_error("uv_loop_init failed (error = %d).\n", err);
   lean_object* r = to_lean<Loop>(loop);
-  *loop_object(uv_loop) = r;
+  uv_loop->data = r;
   loop->io_error = 0;
 
   bool accum = lean_ctor_get_uint8(options, 0);
@@ -96,7 +172,7 @@ more active and referenced handles or requests.  Returns true if there are still
 active and referenced handles or requests.
 -/
 alloy c extern "lean_uv_run"
-def run_aux (loop : @& Loop) (mode : RunMode) : IO Bool := {
+def run_aux (loop : @& Loop) (mode : RunMode) : UV.IO Bool := {
   uv_run_mode lmode = of_lean<RunMode>(mode);
   lean_uv_loop_t* l = of_loop_ext(loop);
   bool stillActive = uv_run(&l->uv, lmode) != 0;
@@ -109,7 +185,7 @@ def run_aux (loop : @& Loop) (mode : RunMode) : IO Bool := {
   }
 }
 
-def run (l : Loop) (mode : RunMode := RunMode.Default) : IO Bool := run_aux l mode
+def run (l : Loop) (mode : RunMode := RunMode.Default) : UV.IO Bool := run_aux l mode
 
 /--
 Return true if the

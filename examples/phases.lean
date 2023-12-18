@@ -11,20 +11,16 @@ def fatalError (msg:String) : IO Unit := do
   (← IO.getStderr).flush
   IO.Process.exit 1
 
-def main : IO Unit := do
-  let pp (s:String) := IO.println s
+def main : IO Unit := UV.IO.run do
   let l ← UV.mkLoop
-  let async ← l.mkAsync fun _ => pp "Async"
   let check ← l.mkCheck
-  check.start do pp "Check"
+  check.start do UV.log "Check"
   let idle ← l.mkIdle
-  idle.start do pp "Idle"
-  IO.println s!"Run 0"
+  idle.start do UV.log "Idle"
+  UV.log s!"Run 0"
   let _ ← l.run UV.RunMode.Once
-  IO.println s!"Run 1"
-  async.send
+  UV.log s!"Run 1"
   let _ ← l.run UV.RunMode.Once
-  IO.println s!"Run 2"
-  async.send
+  UV.log s!"Run 2"
   let _ ← l.run UV.RunMode.Once
-  IO.println s!"Run 3"
+  UV.log s!"Run 3"
