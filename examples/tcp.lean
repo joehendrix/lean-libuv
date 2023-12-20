@@ -2,19 +2,6 @@ import LibUV
 -- This is example code from:
 -- https://medium.com/@padam.singh/an-event-driven-tcp-server-using-libuv-50cce9a473c0
 
-def read_cb (client : UV.TCP) (timer : UV.Timer) (res : UV.ReadResult) : UV.IO Unit := do
-  UV.log "    read_cb: Got read"
-  match res with
-  | .eof =>
-    UV.log s!"EOF"
-    timer.stop
-    client.read_stop
-  | .error e =>
-    throw (.errorcode e)
-  | .ok bytes =>
-    let cmd := String.fromUTF8Unchecked bytes
-    UV.log s!"Read '{cmd}'"
-
 def String.escapeNewLines (s : String) := s.map (fun c => if c == '\n' then ' ' else c)
 
 def UV.TCP.readString (socket : UV.TCP) (eof : UV.IO Unit) (read : String → UV.IO Unit) : UV.IO Unit := do
