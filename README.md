@@ -61,7 +61,7 @@ called.
 
 We adopt the following scheme:
 
-* Every handle object holds a reference to the associated loop.
+* Every handle object holds a reference to the associated loop object.
 * Depending on their type, requests may hold references to handles or
   loops.
 * Every loop, handle and requests hold their corresponding object in the
@@ -69,29 +69,45 @@ We adopt the following scheme:
   but may be null for `uv_handle_t` and `uv_req_t`.
 * When a Lean request object is freed, then the following steps are taken:
   1. The data field for the request object is set to null.
-  2. The reference count for the handle is decremented.
+  2. Any references to Lean objects are released.
+  3. If the request has been fulfilled, then the memory is released.  Otherwise
+     we must wait for callback.
 * When a Lean handle object is freed, then the following steps are taken:
   1. The data field for the handle object is set to null.
   2. If the handle is not active, then `uv_close` is called with
     a callback that will free the handle resources.  Once the callback
     is invoked, `uv_walk` will no longer return the handle.
-  3. The reference to the loop is decremented.
+  3. The reference to the loop is released.
 * When a Lean loop object is freed, then we call `uv_loop_close` and if
   it succeeds we free the loop resources and are done.  If not, then
   we close all active handles with the following steps:
   1. The loop walks the list of handles, and invokes close on each handle
-     that are not closing.
+     that is not closing.
   2. If there were any handles in the loop encountered in step 1, then
      `uv_run` is called with `UV_RUN_DEFAULT` to run all closing callbacks.
     If this returns non-zero, then we exit with a fatal error since this
     reflects a bug in Lean LibUV.
   3. We call `uv_loop_close` again. If it fails again, then we report
      a fatal error since this reflects a bug in Lean LibUV code.
-
+* Handles may need to be closed explicitly.  This is particularly
+  true for streams that are listening on a port, since there is no function to
+  stop listening.  We currently only allow streams to be closed, but may
+  eventually allow all streams to be explicitly closed.
 * If a handle or rquest data field is set to null but needed again for a
   callback, then a new Lean object of the appropriate type will be created
   and `uv_run` invokes a callback on a handle with a null `data` field, then
   a new handle object is created and assigned to `uv_handle_t.data`.
+
+## Sockets closing
+
+Streams have additional potential states as there is no way to stop listening
+once `uv_listen` is invoked.  To work around this, we have an explicit
+`Stream.close` operation that closes the socket, but does not free the underlying
+`uv_stream_t` struct (until the Lean object is finalized).
+
+LibUV does not provide a function to see if a handle has been closed, so we set
+the stream handle loop field to null if the stream has fully closed, but not freed.
+The finalize procedure for a stream must detect this and free the object.
 
 ## Limitations
 

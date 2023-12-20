@@ -19,6 +19,7 @@ if [ $# -eq 0 ]
 then
   runExample "examples/counter.lean"
   runExample "examples/phases.lean"
+  runExample "examples/tcp.lean"
   runExample "examples/timer.lean"
 else
   runExample $1

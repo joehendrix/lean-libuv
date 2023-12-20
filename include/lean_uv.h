@@ -27,12 +27,7 @@ static lean_object* lean_bool(bool b) {
 }
 
 static lean_object* lean_io_unit_result_ok() {
-  static lean_object* r = 0;
-  if (r == 0) {
-    r = lean_io_result_mk_ok(lean_unit());
-    lean_mark_persistent(r);
-  }
-  return r;
+  return lean_io_result_mk_ok(lean_unit());
 }
 
 struct lean_uv_loop_s {
@@ -58,6 +53,16 @@ static lean_object* loop_object(uv_loop_t* l) {
   return (lean_object*) l->data;
 }
 
+/** Finalize a non-stream handle. */
+static inline void lean_uv_finalize_handle(uv_handle_t* h, bool is_active) {
+  if (is_active) {
+    h->data = 0;
+  } else {
+    uv_close(h, (uv_close_cb) free);
+  }
+  lean_dec(h->loop->data);
+}
+
 /*
 Check the callback result from a handle.  The callback result should
 have type `IO Unit`.
@@ -71,7 +76,12 @@ static void check_callback_result(uv_loop_t* loop, lean_object* io_result) {
       return;
     }
   }
-  lean_dec(io_result);
+  lean_dec_ref(io_result);
+}
+
+/** Decrement an object that may be null. */
+static void lean_dec_optref(lean_object* o) {
+  if (o != NULL) lean_dec_ref(o);
 }
 
 /*
@@ -79,12 +89,6 @@ All handles use the data field to refer to the handle for it.
 */
 static lean_object** handle_object(uv_handle_t* p) {
   return (lean_object**) &(p->data);
-}
-
-// This decrements the loop object and frees the handle.
-static void free_handle(uv_handle_t* handle) {
-  lean_dec(loop_object(handle->loop));
-  free(handle);
 }
 
 lean_obj_res lean_uv_raise_invalid_argument(lean_obj_arg msg, lean_obj_arg _s);
@@ -113,7 +117,9 @@ void fatal_st_only(const char *name) {
   fatal_error("%s cannot be made multi-threaded or persistent.", name);
 }
 
-lean_object* lean_uv_io_error(int err);
+extern lean_object* lean_uv_error_mk(int err);
+
+extern lean_object* lean_uv_io_error(int err);
 
 /*
 This struct contains callbacks used by the stream API.
@@ -121,7 +127,7 @@ This struct contains callbacks used by the stream API.
 See "uv_stream_t implementation note" above for more information.
 */
 struct lean_stream_callbacks_s {
-  lean_object* listen_callback; // Object referencing method to call.
+  lean_object* listen_callback;
   lean_object* read_callback; // Object referencing method to call.
 };
 

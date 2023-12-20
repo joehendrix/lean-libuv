@@ -20,22 +20,23 @@ static void Check_foreach(void* ptr, b_lean_obj_arg f) {
   fatal_st_only("Check");
 }
 
+// Close the check handle if the loop stops
+void lean_uv_check_loop_stop(uv_handle_t* h) {
+  lean_uv_check_t* check = (lean_uv_check_t*) h;
+  lean_dec_optref(check->callback);
+  uv_close(h, (uv_close_cb) &free);
+}
+
 static void Check_finalize(void* ptr) {
-  lean_uv_check_t* check = (lean_uv_check_t*) ptr;
-  if (check->callback != NULL) {
-    check->uv.data = 0;
-  } else {
-    uv_close((uv_handle_t*) ptr, (uv_close_cb) &free);
-  }
-  // Release loop object.  Note that this may free the loop object
-  lean_dec(loop_object(check->uv.loop));
+  bool is_active = ((lean_uv_check_t*) ptr)->callback != NULL;
+  lean_uv_finalize_handle((uv_handle_t*) ptr, is_active);
 }
 
 static void check_invoke_callback(uv_check_t* check) {  // Get callback and handler objects
   lean_uv_check_t* luv_check = (lean_uv_check_t*) check;
   lean_object* cb = luv_check->callback;
   lean_inc(cb);
-  check_callback_result(luv_check->uv.loop, lean_apply_1(cb, lean_box(0)));
+  check_callback_result(luv_check->uv.loop, lean_apply_1(cb, lean_io_mk_world()));
 }
 end
 
@@ -61,7 +62,7 @@ alloy c extern "lean_uv_check_start"
 def Check.start (check : @&Check) (callback : UV.IO Unit) : UV.IO Unit := {
   lean_uv_check_t* luv_check = lean_get_external_data(check);
   if (luv_check->callback) {
-    lean_dec(luv_check->callback);
+    lean_dec_ref(luv_check->callback);
   } else {
     uv_check_start(&luv_check->uv, &check_invoke_callback);
   }
@@ -77,7 +78,7 @@ def Check.stop (check : @&Check) : UV.IO Unit := {
   lean_uv_check_t* luv_check = lean_get_external_data(check);
   if (luv_check->callback) {
     uv_check_stop(&luv_check->uv);
-    lean_dec(luv_check->callback);
+    lean_dec_ref(luv_check->callback);
     luv_check->callback = 0;
   }
   return lean_io_unit_result_ok();

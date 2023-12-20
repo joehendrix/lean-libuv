@@ -25,27 +25,29 @@ static lean_object** idle_callback(lean_uv_idle_t* p) {
   return &(p->callback);
 }
 
+// Close the check handle if the loop stops
+void lean_uv_idle_loop_stop(uv_handle_t* h) {
+  lean_uv_idle_t* idle = (lean_uv_idle_t*) h;
+  if (idle->callback != NULL) {
+    lean_dec_ref(idle->callback);
+  }
+  uv_close(h, (uv_close_cb) &free);
+}
+
 static void Idle_foreach(void* ptr, b_lean_obj_arg f) {
   fatal_st_only("Idle");
 }
 
 static void Idle_finalize(void* ptr) {
-  lean_uv_idle_t* idle = ptr;
-  assert((idle->callback != null) == uv_is_active((uv_handle_t*) idle));
-  if (idle->callback) {
-    idle->uv.data = 0;
-  } else {
-    uv_close((uv_handle_t*) ptr, (uv_close_cb) free);
-  }
-  // Release loop object.  Note that this may free the loop object
-  lean_dec(loop_object(idle->uv.loop));
+  bool is_active = ((lean_uv_idle_t*) ptr)->callback != NULL;
+  lean_uv_finalize_handle((uv_handle_t*) ptr, is_active);
 }
 
 static void idle_invoke_callback(uv_idle_t* idle) {
   lean_uv_idle_t* luv_idle = (lean_uv_idle_t*) idle;
   lean_object* cb = luv_idle->callback;
   lean_inc(cb);
-  check_callback_result(luv_idle->uv.loop, lean_apply_1(cb, lean_box(0)));
+  check_callback_result(luv_idle->uv.loop, lean_apply_1(cb, lean_io_mk_world()));
 }
 
 end

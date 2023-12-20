@@ -5,26 +5,57 @@ alloy c include <lean_uv.h>
 
 namespace UV
 
-alloy c enum
-  ErrorCode => int
-  | EALREADY => UV_EALREADY
-  | EINVAL   => UV_EINVAL
-  deriving Inhabited, Repr
+inductive ErrorCode where
+| EALREADY
+| ECANCELED
+| EINVAL
+| ETIMEDOUT
+deriving Inhabited, Repr
+
+alloy c section
+
+#define LUV_EALREADY 0
+#define LUV_ECANCELED 1
+#define LUV_EINVAL 2
+#define LUV_ETIMEDOUT 3
+
+lean_object* lean_uv_error_mk(int code) {
+  if (code >= 0)
+    fatal_error("Unexpected success code %d.\n", code);
+  size_t r;
+  switch (code) {
+  case UV_EALREADY:
+    r = LUV_EALREADY;
+    break;
+  case UV_ECANCELED:
+    r = LUV_ECANCELED;
+    break;
+  case UV_EINVAL:
+    r = LUV_EINVAL;
+    break;
+  case UV_ETIMEDOUT:
+    r = LUV_ETIMEDOUT;
+    break;
+  default:
+    fatal_error("Unexpected error code %s.\n", uv_err_name(code));
+  }
+  return lean_box(r);
+}
+end
 
 protected inductive Error where
 | errorcode : ErrorCode → UV.Error
 | user : String → UV.Error
 
-attribute [export lean_uv_error_errorcode] UV.Error.errorcode
+@[export lean_uv_error_errorcode]
+def UV.Error.errorcode_c  := Error.errorcode
 
 alloy c section
 lean_object* lean_uv_error_errorcode(lean_object* err);
 
 /* Returns an IO error for the given error code. */
-lean_object* lean_uv_io_error(int err) {
-  lean_object* r = lean_box(to_lean<ErrorCode>(err));
-  r = lean_uv_error_errorcode(r);
-  return lean_io_result_mk_error(r);
+extern lean_object* lean_uv_io_error(int err) {
+  return lean_io_result_mk_error(lean_uv_error_errorcode(lean_uv_error_mk(err)));
 }
 
 end
@@ -35,12 +66,20 @@ protected def IO := EIO UV.Error
 
 protected def IO.run (act : UV.IO α) : IO α := do
   match ← act.toBaseIO with
-  | .error (.errorcode e) => dbg_trace "A" throw (IO.userError s!"UV.IO failed (error = {repr e})")
-  | .error (.user msg) => dbg_trace "B" throw (IO.userError msg)
-  | .ok r => dbg_trace "C" pure r
+  | .error (.errorcode e) => throw (IO.userError s!"UV.IO failed (error = {repr e})")
+  | .error (.user msg) => throw (IO.userError msg)
+  | .ok r => pure r
 
-protected opaque log (s : @& String) : UV.IO Unit := do
-  (IO.println s).toBaseIO >>= fun _ => pure ()
+@[extern "lean_uv_log"]
+protected opaque log (s : @& String) : UV.IO Unit
+
+alloy c section
+lean_object* lean_uv_log(b_lean_obj_arg s, b_lean_obj_arg rw) {
+  printf("%s\n", lean_string_cstr(s));
+  return lean_io_result_mk_ok(lean_unit());
+}
+end
+
 
 protected def fatal {α} (msg : String) : UV.IO α :=
   (throw (.user msg) : EIO UV.Error α)
@@ -70,19 +109,28 @@ private def raiseInvalidArgument (message:String) : UV.IO α :=
 
 alloy c section
 
-static void close_stream(uv_handle_t* h) {
-  free(lean_stream_base(h));
-}
+void lean_uv_check_loop_stop(uv_handle_t* h);
+void lean_uv_idle_loop_stop(uv_handle_t* h);
+void lean_uv_tcp_loop_stop(uv_handle_t* h);
+void lean_uv_timer_loop_stop(uv_handle_t* h);
 
 static void stop_handles(uv_handle_t* h, void* arg) {
+  if (uv_is_closing(h)) return;
   switch (h->type) {
-  case UV_NAMED_PIPE:
+  case UV_CHECK:
+    lean_uv_check_loop_stop(h);
+    break;
+  case UV_IDLE:
+    lean_uv_idle_loop_stop(h);
+    break;
   case UV_TCP:
-  case UV_TTY:
-    uv_close(h, &close_stream);
+    lean_uv_tcp_loop_stop(h);
+    break;
+  case UV_TIMER:
+    lean_uv_timer_loop_stop(h);
     break;
   default:
-    uv_close(h, (uv_close_cb) &free);
+    fatal_error("Unsupported handle type %s", uv_handle_type_name(h->type));
     break;
   }
 }
@@ -108,10 +156,14 @@ static void Loop_finalize(void* ptr) {
   }
 }
 
+static void Loop_foreach(void* ptr, b_lean_obj_arg f) {
+  fatal_st_only("Loop");
+}
+
 end
 
 alloy c extern_type Loop => lean_uv_loop_t := {
-  foreach := `lean_uv_null_foreach
+  foreach := `Loop_foreach
   finalize := `Loop_finalize
 }
 
