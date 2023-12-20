@@ -40,12 +40,12 @@ typedef struct lean_uv_loop_s lean_uv_loop_t;
 
 /** Return the Lean loop object from the */
 static uv_loop_t* of_loop(lean_object* l) {
-  return lean_get_external_data(l);
+  return (uv_loop_t*) lean_get_external_data(l);
 }
 
 /** Return the Lean loop object from the */
 static lean_uv_loop_t* of_loop_ext(lean_object* l) {
-  return lean_get_external_data(l);
+  return (lean_uv_loop_t*) lean_get_external_data(l);
 }
 
 /* Return lean object representing this handle */
@@ -60,7 +60,7 @@ static inline void lean_uv_finalize_handle(uv_handle_t* h, bool is_active) {
   } else {
     uv_close(h, (uv_close_cb) free);
   }
-  lean_dec(h->loop->data);
+  lean_dec((lean_object*) h->loop->data);
 }
 
 /*
@@ -137,3 +137,46 @@ static void* lean_stream_base(uv_handle_t* h) {
   lean_stream_callbacks_t* op = (lean_stream_callbacks_t*) h;
   return (op - 1);
 }
+
+static void lean_uv_close_stream(uv_handle_t* h) {
+  free(lean_stream_base(h));
+}
+
+// Check
+
+struct lean_uv_check_s {
+  uv_check_t uv;
+  // Lean function to invoke callback on.
+  // Initialized to be valid object.
+  lean_object* callback;
+};
+
+typedef struct lean_uv_check_s lean_uv_check_t;
+
+// Idle
+struct lean_uv_idle_s {
+  uv_idle_t uv;
+  // callback object
+  lean_object* callback;
+};
+
+typedef struct lean_uv_idle_s lean_uv_idle_t;
+
+// TCP
+
+struct lean_uv_tcp_s {
+  lean_stream_callbacks_t callbacks;
+  uv_tcp_t uv;
+  bool connecting;
+};
+
+typedef struct lean_uv_tcp_s lean_uv_tcp_t;
+
+// Timer
+
+struct lean_uv_timer_s {
+  uv_timer_t uv;
+  lean_object* callback; // Callback for timer event
+};
+
+typedef struct lean_uv_timer_s lean_uv_timer_t;

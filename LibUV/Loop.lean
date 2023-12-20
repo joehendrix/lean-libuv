@@ -19,7 +19,7 @@ alloy c section
 #define LUV_EINVAL 2
 #define LUV_ETIMEDOUT 3
 
-lean_object* lean_uv_error_mk(int code) {
+LEAN_EXPORT lean_object* lean_uv_error_mk(int code) {
   if (code >= 0)
     fatal_error("Unexpected success code %d.\n", code);
   size_t r;
@@ -54,7 +54,7 @@ alloy c section
 lean_object* lean_uv_error_errorcode(lean_object* err);
 
 /* Returns an IO error for the given error code. */
-extern lean_object* lean_uv_io_error(int err) {
+LEAN_EXPORT lean_object* lean_uv_io_error(int err) {
   return lean_io_result_mk_error(lean_uv_error_errorcode(lean_uv_error_mk(err)));
 }
 
@@ -109,10 +109,38 @@ private def raiseInvalidArgument (message:String) : UV.IO α :=
 
 alloy c section
 
-void lean_uv_check_loop_stop(uv_handle_t* h);
-void lean_uv_idle_loop_stop(uv_handle_t* h);
-void lean_uv_tcp_loop_stop(uv_handle_t* h);
-void lean_uv_timer_loop_stop(uv_handle_t* h);
+static void uv_close_and_free(uv_handle_t* h) {
+  uv_close(h, (uv_close_cb) &free);
+}
+
+// Close the check handle if the loop stops
+static void lean_uv_check_loop_stop(uv_handle_t* h) {
+  lean_uv_check_t* check = (lean_uv_check_t*) h;
+  lean_dec_optref(check->callback);
+  uv_close_and_free(h);
+}
+
+// Close the idle handle if the loop stops
+static void lean_uv_idle_loop_stop(uv_handle_t* h) {
+  lean_uv_idle_t* idle = (lean_uv_idle_t*) h;
+  lean_dec_optref(idle->callback);
+  uv_close_and_free(h);
+}
+
+// Close the check handle if the loop stops
+static void lean_uv_tcp_loop_stop(uv_handle_t* h) {
+  lean_uv_tcp_t* tcp = lean_stream_base(h);
+  lean_stream_callbacks_t* callbacks = &tcp->callbacks;
+  lean_dec_optref(callbacks->listen_callback);
+  lean_dec_optref(callbacks->read_callback);
+  uv_close(h, &lean_uv_close_stream);
+}
+
+static void lean_uv_timer_loop_stop(uv_handle_t* h) {
+  lean_uv_timer_t* timer = (lean_uv_timer_t*) h;
+  lean_dec_optref(timer->callback);
+  uv_close_and_free(h);
+}
 
 static void stop_handles(uv_handle_t* h, void* arg) {
   if (uv_is_closing(h)) return;
@@ -200,12 +228,15 @@ def mkLoop (options : Loop.Options := {}) : BaseIO Loop := {
       fatal_error("uv_loop_configure failed (error = %d).\n", err);
     }
   }
+#if defined(WIN32) || defined(_WIN32)
+#else
   if (block) {
     int err = uv_loop_configure(uv_loop, UV_LOOP_BLOCK_SIGNAL, SIGPROF);
     if (err != 0) {
       fatal_error("uv_loop_configure failed (error = %d).\n", err);
     }
   }
+#endif
   return lean_io_result_mk_ok(r);
 }
 

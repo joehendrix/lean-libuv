@@ -7,22 +7,8 @@ namespace UV
 
 alloy c section
 
-struct lean_uv_timer_s {
-  uv_timer_t uv;
-  lean_object* callback; // Callback for timer event
-};
-
-typedef struct lean_uv_timer_s lean_uv_timer_t;
-
 static void Timer_foreach(void* ptr, b_lean_obj_arg f) {
   fatal_st_only("Timer");
-}
-
-// Close the check handle if the loop stops
-void lean_uv_timer_loop_stop(uv_handle_t* h) {
-  lean_uv_timer_t* timer = (lean_uv_timer_t*) h;
-  lean_dec_optref(timer->callback);
-  uv_close(h, (uv_close_cb) &free);
 }
 
 static void Timer_finalize(void* ptr) {

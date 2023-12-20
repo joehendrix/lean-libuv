@@ -6,15 +6,6 @@ alloy c include <lean_uv.h>
 namespace UV
 
 alloy c section
-
-struct lean_uv_idle_s {
-  uv_idle_t uv;
-  // callback object
-  lean_object* callback;
-};
-
-typedef struct lean_uv_idle_s lean_uv_idle_t;
-
 /* Return lean object representing this idler */
 static uv_handle_t* idle_handle(lean_uv_idle_t* p) {
   return (uv_handle_t*) &(p->uv);
@@ -23,15 +14,6 @@ static uv_handle_t* idle_handle(lean_uv_idle_t* p) {
 /* Return callback associated with idler */
 static lean_object** idle_callback(lean_uv_idle_t* p) {
   return &(p->callback);
-}
-
-// Close the check handle if the loop stops
-void lean_uv_idle_loop_stop(uv_handle_t* h) {
-  lean_uv_idle_t* idle = (lean_uv_idle_t*) h;
-  if (idle->callback != NULL) {
-    lean_dec_ref(idle->callback);
-  }
-  uv_close(h, (uv_close_cb) &free);
 }
 
 static void Idle_foreach(void* ptr, b_lean_obj_arg f) {

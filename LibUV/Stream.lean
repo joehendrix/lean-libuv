@@ -615,29 +615,8 @@ section TCP
 
 alloy c section
 
-struct lean_uv_tcp_s {
-  lean_stream_callbacks_t callbacks;
-  uv_tcp_t uv;
-  bool connecting;
-};
-
-typedef struct lean_uv_tcp_s lean_uv_tcp_t;
-
 static void TCP_foreach(void* ptr, b_lean_obj_arg f) {
   fatal_st_only("TCP");
-}
-
-void lean_uv_close_stream(uv_handle_t* h) {
-  free(lean_stream_base(h));
-}
-
-// Close the check handle if the loop stops
-extern void lean_uv_tcp_loop_stop(uv_handle_t* h) {
-  lean_uv_tcp_t* tcp = lean_stream_base(h);
-  lean_stream_callbacks_t* callbacks = &tcp->callbacks;
-  lean_dec_optref(callbacks->listen_callback);
-  lean_dec_optref(callbacks->read_callback);
-  uv_close(h, &lean_uv_close_stream);
 }
 
 static void TCP_finalize(void* ptr) {

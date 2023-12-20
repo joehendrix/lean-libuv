@@ -7,24 +7,8 @@ namespace UV
 
 alloy c section
 
-struct lean_uv_check_s {
-  uv_check_t uv;
-  // Lean function to invoke callback on.
-  // Initialized to be valid object.
-  lean_object* callback;
-};
-
-typedef struct lean_uv_check_s lean_uv_check_t;
-
 static void Check_foreach(void* ptr, b_lean_obj_arg f) {
   fatal_st_only("Check");
-}
-
-// Close the check handle if the loop stops
-void lean_uv_check_loop_stop(uv_handle_t* h) {
-  lean_uv_check_t* check = (lean_uv_check_t*) h;
-  lean_dec_optref(check->callback);
-  uv_close(h, (uv_close_cb) &free);
 }
 
 static void Check_finalize(void* ptr) {
