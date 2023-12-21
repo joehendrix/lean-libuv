@@ -190,7 +190,7 @@ static void Loop_foreach(void* ptr, b_lean_obj_arg f) {
 
 end
 
-alloy c extern_type Loop => lean_uv_loop_t := {
+alloy c opaque_extern_type Loop => lean_uv_loop_t := {
   foreach := `Loop_foreach
   finalize := `Loop_finalize
 }

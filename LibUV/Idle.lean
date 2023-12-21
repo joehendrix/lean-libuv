@@ -34,7 +34,7 @@ static void idle_invoke_callback(uv_idle_t* idle) {
 
 end
 
-alloy c extern_type Idle => lean_uv_idle_t := {
+alloy c opaque_extern_type Idle => lean_uv_idle_t := {
   foreach := `Idle_foreach
   finalize := `Idle_finalize
 }

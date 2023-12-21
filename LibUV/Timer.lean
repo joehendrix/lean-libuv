@@ -6,7 +6,6 @@ alloy c include <lean_uv.h>
 namespace UV
 
 alloy c section
-
 static void Timer_foreach(void* ptr, b_lean_obj_arg f) {
   fatal_st_only("Timer");
 }
@@ -24,7 +23,7 @@ static void timer_callback(uv_timer_t* timer) {
 }
 end
 
-alloy c extern_type Timer => lean_uv_timer_t := {
+alloy c opaque_extern_type Timer => lean_uv_timer_t := {
   foreach  := `Timer_foreach
   finalize := `Timer_finalize
 }

@@ -554,27 +554,23 @@ lean_obj_res lean_uv_write(b_lean_obj_arg streamObj, b_lean_obj_arg bufObj,
     return lean_io_result_mk_ok(reqObj);
   }
 }
-
 end
-
 
 section SockAddr
 
 alloy c section
-
 static void SockAddr_finalize(void* ptr) {
   free(ptr);
 }
 
 static void SockAddr_foreach(void* ptr, b_lean_obj_arg f) {
 }
-
 end
 
 /--
 A IPV4 or IPv6 socket address
 -/
-alloy c extern_type SockAddr => struct sockaddr := {
+alloy c opaque_extern_type SockAddr => struct sockaddr := {
   foreach  := `SockAddr_foreach
   finalize := `SockAddr_finalize
 }
@@ -644,7 +640,7 @@ static void TCP_finalize(void* ptr) {
 
 end
 
-alloy c extern_type TCP => uv_tcp_t := {
+alloy c opaque_extern_type TCP => uv_tcp_t := {
   foreach  := `TCP_foreach
   finalize := `TCP_finalize
 }
