@@ -1,12 +1,14 @@
-{"version": 6,
- "packagesDir": "lake-packages",
+{"version": 7,
+ "packagesDir": ".lake/packages",
  "packages":
- [{"git":
-   {"url": "https://github.com/tydeu/lean4-alloy.git",
-    "subDir?": null,
-    "rev": "3dfe3ef408faa860e4c75504fe51503b56e9adc4",
-    "opts": {},
-    "name": "alloy",
-    "inputRev?": null,
-    "inherited": false}}],
- "name": "LibUV"}
+ [{"url": "https://github.com/tydeu/lean4-alloy.git",
+   "type": "git",
+   "subDir": null,
+   "rev": "98a8cbdd77d0080dc65ea01c50708f616e0717a8",
+   "name": "alloy",
+   "manifestFile": "lake-manifest.json",
+   "inputRev": null,
+   "inherited": false,
+   "configFile": "lakefile.lean"}],
+ "name": "LibUV",
+ "lakeDir": ".lake"}

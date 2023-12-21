@@ -24,7 +24,7 @@ static void check_invoke_callback(uv_check_t* check) {  // Get callback and hand
 }
 end
 
-alloy c extern_type Check => lean_uv_check_t := {
+alloy c opaque_extern_type Check => lean_uv_check_t := {
   foreach  := `Check_foreach
   finalize := `Check_finalize
 }

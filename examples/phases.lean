@@ -6,11 +6,6 @@ This is a Lean implementation of `idle-basic/main.c` with a smaller counter in
 -/
 import LibUV
 
-def fatalError (msg:String) : IO Unit := do
-  IO.eprintln msg
-  (← IO.getStderr).flush
-  IO.Process.exit 1
-
 def main : IO Unit := UV.IO.run do
   let l ← UV.mkLoop
   let check ← l.mkCheck
