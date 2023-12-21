@@ -14,10 +14,6 @@ deriving Inhabited, Repr
 
 alloy c section
 
-#define LUV_EALREADY 0
-#define LUV_ECANCELED 1
-#define LUV_EINVAL 2
-#define LUV_ETIMEDOUT 3
 
 LEAN_EXPORT lean_object* lean_uv_error_mk(int code) {
   if (code >= 0)
@@ -46,6 +42,7 @@ end
 protected inductive Error where
 | errorcode : ErrorCode → UV.Error
 | user : String → UV.Error
+deriving Repr
 
 @[export lean_uv_error_errorcode]
 def UV.Error.errorcode_c  := Error.errorcode
@@ -164,6 +161,7 @@ static void stop_handles(uv_handle_t* h, void* arg) {
 }
 
 static void Loop_finalize(void* ptr) {
+  printf("Loop_finalize\n");
   uv_loop_t* loop = (uv_loop_t*) ptr;
   int err = uv_loop_close(loop);
   if (err == UV_EBUSY) {

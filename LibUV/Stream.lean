@@ -1,19 +1,8 @@
 import LibUV.Loop
+import LibUV.NonemptyProp
 
 open scoped Alloy.C
 alloy c include <stdlib.h> <lean_uv.h>
-
-section NonemptyProp
-
-
-def NonemptyProp := Subtype fun α : Prop => Nonempty α
-
-instance : Inhabited NonemptyProp := ⟨⟨PUnit, ⟨⟨⟩⟩⟩⟩
-
-/-- The underlying type of a `NonemptyType`. -/
-abbrev NonemptyProp.type (type : NonemptyProp) : Prop := type.val
-
-end NonemptyProp
 
 namespace UV
 
@@ -95,7 +84,7 @@ static void Req_foreach(void* ptr, b_lean_obj_arg f) {
   fatal_st_only("Req");
 }
 
-static void Shutdown_finalize(void* ptr) {
+static void ShutdownFree(void* ptr) {
   lean_uv_shutdown_t* req = (lean_uv_shutdown_t*) ptr;
   // Release counter on handle.
   lean_dec_ref(req->uv.handle->data);
@@ -105,23 +94,6 @@ static void Shutdown_finalize(void* ptr) {
     free(req);
   }
 }
-
-static lean_external_class * shutdown_class = NULL;
-end
-
-/--
-This returns the handle associated with the shutdown request.
--/
-@[extern "lean_uv_shutdown_req_handle"]
-opaque ShutdownReq.handle [Inhabited α] (req : @&ShutdownReq α) : α
-
-alloy c section
-lean_obj_res lean_uv_shutdown_req_handle(b_lean_obj_arg reqObj, b_lean_obj_arg _rw) {
-  lean_uv_shutdown_t* req = lean_get_external_data(reqObj);
-  lean_object* hdl = req->uv.handle->data;
-  lean_inc(hdl);
-  return hdl;
-}
 end
 
 /--
@@ -130,7 +102,7 @@ It waits for pending write requests to complete.
 The cb is called after shutdown is complete.
 -/
 @[extern "lean_uv_shutdown"]
-opaque Stream.shutdown [Stream α] (handle : α) (cb : Bool → BaseIO Unit) : UV.IO (ShutdownReq α)
+opaque Stream.shutdown [Stream α] (handle : @&α) (cb : Bool → UV.IO Unit) : UV.IO Unit
 
 alloy c section
 
@@ -146,12 +118,6 @@ static void invoke_rec_callback(uv_loop_t* loop, uv_req_t* req, lean_object** cb
   check_callback_result(loop, lean_apply_2(cb, status, lean_io_mk_world()));
 }
 
-static lean_obj_res mk_req(lean_external_class* cl, void* req) {
-  lean_object* reqObj = lean_alloc_external(cl, req);
-  ((uv_req_t*) req)->data = reqObj;
-  return reqObj;
-}
-
 static void shutdown_cb(uv_shutdown_t *req, int status) {
   lean_uv_shutdown_t* lreq = (lean_uv_shutdown_t*) req;
   invoke_rec_callback(req->handle->loop, (uv_req_t*) req, &lreq->callback, lean_bool(status == 0));
@@ -159,22 +125,15 @@ static void shutdown_cb(uv_shutdown_t *req, int status) {
 
 lean_obj_res lean_uv_shutdown(b_lean_obj_arg handle, lean_obj_arg cb, b_lean_obj_arg _rw) {
   lean_uv_shutdown_t* req = malloc(sizeof(lean_uv_shutdown_t));
-  if (shutdown_class == NULL)
-    shutdown_class = lean_register_external_class(Shutdown_finalize, Req_foreach);
-  lean_object* reqObj = mk_req(shutdown_class, req);
   uv_stream_t* hdl = lean_get_external_data(handle);
   int ec = uv_shutdown(&req->uv, hdl, &shutdown_cb);
   if (ec < 0) {
-    // Release callback
     lean_dec_ref(cb);
-    req->callback = 0;
-    // Make sure handle is initialized to avoid special case in Shutdown_finalize.
-    req->uv.handle = hdl;
-    lean_free_object(reqObj);
+    free(req);
     fatal_error("uv_shutdown_req failed (error = %d)", ec);
   }
   req->callback = cb;
-  return lean_io_result_mk_ok(reqObj);
+  return lean_io_result_mk_ok(lean_unit());
 }
 
 end
@@ -412,7 +371,7 @@ This stops reading data from the stream.
 It always succeeds even if data is not being read from stream.
 -/
 @[extern "lean_uv_read_stop"]
-opaque Stream.read_stop [Stream α] (stream : @&α) : BaseIO Unit
+opaque Stream.read_stop [Stream α] (stream : @&α) : UV.IO Unit
 
 alloy c section
 lean_object* lean_uv_read_stop(lean_object* stream_obj) {
@@ -459,25 +418,10 @@ The external data of a ShutdownReq in Lean is a lean_uv_shutdown_t req where:
 */
 struct lean_uv_write_s {
   uv_write_t uv;
-  lean_object* callback;
-  uv_buf_t* bufs;
-  size_t bufcnt;
+  lean_object* array;
 };
 
 typedef struct lean_uv_write_s lean_uv_write_t;
-
-static void Write_finalize(void* ptr) {
-  lean_uv_write_t* req = (lean_uv_write_t*) ptr;
-  // Release counter on handle.
-  lean_dec_ref(req->uv.handle->data);
-  if (req->callback) {
-    req->uv.data = 0;
-  } else {
-    free(req);
-  }
-}
-
-static lean_external_class * write_class = NULL;
 end
 
 /--
@@ -498,27 +442,21 @@ end
 end Write
 
 @[extern "lean_uv_write"]
-opaque Stream.write [Stream α] (stream : α) (bufs : @&Array ByteArray)
-  (callback : Bool → UV.IO Unit) : UV.IO (WriteReq α)
+opaque Stream.write [Stream α] (stream : @&α) (bufs : @&Array ByteArray)
+  (callback : Bool → UV.IO Unit) : UV.IO Unit
 
 alloy c section
 static void write_cb(uv_write_t *req, int status) {
-  lean_uv_write_t* lreq = (lean_uv_write_t*) req;
   uv_loop_t* loop = req->handle->loop;
   lean_object* success = lean_bool(status == 0);
   // If the request object has been freed, then we can free the request
   // object as well.
-  lean_object* cb = lreq->callback;
-  if (req->data) {
-    lreq->callback = 0;
-    uv_buf_t* bufs = lreq->bufs;
-    uv_buf_t* bufEnd = bufs + lreq->bufcnt;
-    for (uv_buf_t* buf = bufs; buf != bufEnd; ++buf)
-      dec_buf_array(buf);
-    free(bufs);
-  } else {
-    free(req);
-  }
+  lean_object* cb = req->data;
+
+  lean_uv_write_t* lreq = (lean_uv_write_t*) req;
+  // Release array references
+  lean_dec_ref(lreq->array);
+  free(req);
   check_callback_result(loop, lean_apply_2(cb, success, lean_io_mk_world()));
 }
 
@@ -530,29 +468,26 @@ lean_obj_res lean_uv_write(b_lean_obj_arg streamObj, b_lean_obj_arg bufObj,
   }
 
   lean_uv_write_t* req = checked_malloc(sizeof(lean_uv_write_t));
-  if (write_class == NULL)
-    write_class = lean_register_external_class(Write_finalize, Req_foreach);
-  lean_object* reqObj = mk_req(write_class, req);
   uv_stream_t* hdl = lean_get_external_data(streamObj);
-
   lean_object** bufObjs = lean_array_cptr(bufObj);
-
-  uv_buf_t* bufArray = malloc(sizeof(uv_buf_t) * nbufs);
+  uv_buf_t* bufArray = checked_malloc(sizeof(uv_buf_t) * nbufs);
   for (size_t i = 0; i != nbufs; ++i) {
-    init_buf(bufArray + i, bufObjs[i]);
+    lean_object* a = bufObjs[i];
+    uv_buf_t* buf = bufArray + i;
+    buf->base = (char*) lean_sarray_cptr(a);
+    buf->len = lean_sarray_size(a);
   }
-
   int ec = uv_write(&req->uv, hdl, bufArray, nbufs, &write_cb);
+  free(bufArray);
   if (ec < 0) {
     lean_dec_ref(callback);
-    req->callback = 0;
-    req->uv.handle = hdl;
-    lean_free_object(req->uv.data);
+    lean_dec_ref(bufObj);
+    free(req);
     fatal_error("uv_write failed (error = %d)", ec);
-  } else {
-    req->callback = callback;
-    return lean_io_result_mk_ok(reqObj);
   }
+  req->uv.data = callback;
+  req->array = bufObj;
+  return lean_io_result_mk_ok(lean_unit());
 }
 end
 
@@ -646,11 +581,14 @@ alloy c opaque_extern_type TCP => uv_tcp_t := {
 }
 
 alloy c extern "lean_uv_tcp_init"
-def Loop.mkTCP (loop : Loop) : BaseIO TCP := {
+def Loop.mkTCP (loop : Loop) : UV.IO TCP := {
   lean_uv_tcp_t* tcp = checked_malloc(sizeof(lean_uv_tcp_t));
   init_stream_callbacks(&tcp->callbacks);
   tcp->connecting = false;
-  uv_tcp_init(of_loop(loop), &tcp->uv);
+  int ec = uv_tcp_init(of_loop(loop), &tcp->uv);
+  if (ec < 0) {
+    fatal_error("Loop.mkTCP failed %d\n", ec);
+  }
   lean_object* r = to_lean<TCP>(&tcp->uv);
   tcp->uv.data = r;
   return lean_io_result_mk_ok(r);
@@ -673,47 +611,6 @@ def bind (tcp : @&TCP) (addr : @&SockAddr) : UV.IO Unit := {
     fatal_error("uv_tcp_bind failed (error = %d)\n", err);
   return lean_io_unit_result_ok();
 }
-
-/-- References -/
-opaque ConnectReqPointed : NonemptyType.{0}
-
-/-- A shutdown request -/
-structure ConnectReq (α : Type) : Type where
-  ref : ConnectReqPointed.type
-
-instance : Nonempty (ConnectReq α) :=
-  Nonempty.intro { ref := Classical.choice ConnectReqPointed.property }
-
-
-alloy c section
-/*
-The external data of a ConnectReq in Lean is a lean_uv_connect_t req where:
-
-  req.uv.handle is a pointer to a uv_stream_t.
-  req.uv.data is a pointer to the Lean shutdown_req object.  This is set
-    to null if the shutdown request memory is released.
-  req.callback is a pointer to the callback to invoke when the shutdown completes.
-  This is set to null after the callback returns.
-*/
-struct lean_uv_connect_s {
-  uv_connect_t uv;
-  lean_object* callback;
-};
-
-typedef struct lean_uv_connect_s lean_uv_connect_t;
-
-static void Connect_finalize(void* ptr) {
-  lean_uv_connect_t* req = (lean_uv_connect_t*) ptr;
-  lean_dec_ref(req->uv.handle->data);
-  if (req->callback) {
-    req->uv.data = 0;
-  } else {
-    free(req);
-  }
-}
-
-static lean_external_class * connect_class = NULL;
-end
 
 inductive ConnectionResult where
 | ok : ConnectionResult
@@ -740,43 +637,36 @@ static void tcp_connect_cb(uv_connect_t *req, int status) {
     }
     break;
   }
-
-  lean_uv_connect_t* lreq = (lean_uv_connect_t*) req;
-  lean_uv_tcp_t* luv_tcp = lean_stream_base((uv_handle_t*) req->handle);
+  uv_handle_t* handle = (uv_handle_t*) req->handle;
+  lean_uv_tcp_t* luv_tcp = lean_stream_base(handle);
   luv_tcp->connecting = false;
-  invoke_rec_callback(req->handle->loop, (uv_req_t*) req, &lreq->callback, statusObj);
+
+  // If the request object has been freed, then we can free the request
+  // object as well.
+  lean_object* cb = req->data;
+  free(req);
+  check_callback_result(handle->loop, lean_apply_2(cb, statusObj, lean_io_mk_world()));
 }
+
 end
 
 alloy c extern "lean_uv_tcp_connect"
-def connect (tcp : TCP) (addr : @&SockAddr) (callback : ConnectionResult → UV.IO Unit) : UV.IO (ConnectReq TCP) := {
-  lean_uv_tcp_t* luv_tcp = lean_stream_base(lean_get_external_data(tcp));
-  uv_tcp_t* uv_tcp = &luv_tcp->uv;
-  uv_stream_t* hdl = (uv_stream_t*) uv_tcp;
-  if (luv_tcp->connecting) {
+def connect (tcp : @&TCP) (addr : @&SockAddr) (callback : ConnectionResult → UV.IO Unit) : UV.IO Unit := {
+  uv_tcp_t* uv_tcp = lean_get_external_data(tcp);
+  lean_uv_tcp_t* luv_tcp = lean_stream_base((uv_handle_t*) uv_tcp);
+  if (luv_tcp->connecting)
     return lean_uv_io_error(UV_EINVAL);
-  }
-  lean_uv_connect_t* req = malloc(sizeof(lean_uv_connect_t));
-
-  if (connect_class == NULL)
-    connect_class = lean_register_external_class(Connect_finalize, Req_foreach);
-  lean_object* reqObj = mk_req(connect_class, req);
-  req->callback = callback;
-
+  uv_connect_t* req = malloc(sizeof(uv_connect_t));
   const struct sockaddr *uv_addr = of_lean<SockAddr>(addr);
-
-  int ec = uv_tcp_connect(&req->uv, uv_tcp, uv_addr, &tcp_connect_cb);
+  int ec = uv_tcp_connect(req, uv_tcp, uv_addr, &tcp_connect_cb);
   if (ec < 0) {
-    lean_dec_ref(tcp);
     lean_dec_ref(callback);
-    req->callback = 0;
-    // Make sure handle is initialized to avoid special case in Shutdown_finalize.
-    req->uv.handle = hdl;
-    lean_free_object(reqObj);
+    free(req);
     fatal_error("uv_tcp_connect failed (error = %d)", ec);
   }
+  req->data = callback;
   luv_tcp->connecting = true;
-  return lean_io_result_mk_ok(reqObj);
+  return lean_io_result_mk_ok(lean_unit());
 }
 
 def listen (tcp : TCP) (backlog : UInt32) (callback : UV.IO Unit) : UV.IO Unit :=

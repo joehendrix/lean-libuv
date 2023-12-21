@@ -180,3 +180,8 @@ struct lean_uv_timer_s {
 };
 
 typedef struct lean_uv_timer_s lean_uv_timer_t;
+
+#define LUV_EALREADY 0
+#define LUV_ECANCELED 1
+#define LUV_EINVAL 2
+#define LUV_ETIMEDOUT 3

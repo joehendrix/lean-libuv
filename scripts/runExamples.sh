@@ -2,8 +2,9 @@
 lake build
 
 search_dir=/the/path/to/base/dir
+# Load dylibs for OSX (FIXME: Support Windows and Linux)
 dylibs=""
-for entry in "build/lib"/*.dylib;
+for entry in ".lake/build/lib"/*.dylib;
 do
   dylibs+=" --load-dynlib=$entry"
 done
@@ -21,6 +22,7 @@ then
   runExample "examples/phases.lean"
   runExample "examples/tcp.lean"
   runExample "examples/timer.lean"
+  runExample "examples/work.lean"
 else
   runExample $1
 fi
