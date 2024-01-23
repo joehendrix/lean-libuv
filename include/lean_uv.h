@@ -1,4 +1,5 @@
 #include <lean/lean.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <uv.h>
 
