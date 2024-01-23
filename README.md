@@ -1,30 +1,69 @@
 # LibUV Bindings for Lean
 
 This library aims to provide a Lean interface to the
-[LibUV](https://libuv.org/) cross-platform library that
-abstracts core operating system operations including
-asynchronous IO, managing concurrent processes and threads,
-and monitoring files for changes.
+[LibUV](https://libuv.org/) cross-platform library that abstracts core
+operating system operations including asynchronous IO, managing
+concurrent processes and threads, and monitoring files for changes.
 
 ## Overview
 
 `libuv` has three main entities
 
-* Loops are event loops that maintain a list of all handles associated
-  with that loop, and have a run method that can be called to run events
-  in that loop.
+* Handles represent resources with the potential for events an application
+  may want to respond to.  Events are processed by callback functions.
+  There are multiple types of handles and the set of events a handle provide
+  depends on the type.
 
-* Handles represent resources that can be active or inactive and have
-  events one can attach callbacks to.  Each handle is associated with a
-  single loop and one can obtain the loop a handle is associated with.
+* Loops represent collection of handles and provide a function `run` for
+  enabling a thread to execute all the pending callbacks efficienctly.  Each
+  handle is associated with at most one loop, and loops are not designed for
+  concurrent access.  One should not invoke methods on a loop or handles
+  associated with a loop in multiple threads concurrently.
 
 * Requests represent asynchronous actions that can be potentially
   cancelled if the result is no longer needed.  One can get the handle
-  assocaited with a request.
+  assocaiated with a request.
 
 There is also a subtype of handles, called
 [Streams](https://docs.libuv.org/en/v1.x/stream.html), that are used
 by TCP, Pipes and TTYs via a common API for streams.
+
+## Intentional Design Constraints
+
+`libuv` has APIs for multi-threading that can on a broad set of platforms, but
+intentionally exposes a fairly limited API for improved corrrectness and ABI
+stability across a broad set of platforms.  As such we do not attempt to
+wrap all `LibUV` operations as they may come with limitations.  However, we
+plan to provide mechanisms for all omited functionality.
+
+The [Async handles](https://docs.libuv.org/en/v1.x/async.html) in a loop
+are stored in a single list that is iterated through anytime a wakeup
+event is processed.  This is a [known performance
+problem](https://github.com/libuv/libuv/issues/1866) if one creates many
+async handles that aren't triggered very often.  The issue has been
+reported, and will not be fixed due to ABI stability and other concerns.
+
+The [`libuv` threadpool](https://docs.libuv.org/en/v1.x/threadpool.html)
+is a global threadpool for file system operations as well as
+`getaddrinfo` and `getnameinfo` requests.  `libuv` provides a function
+[`uv_queue_work`](https://docs.libuv.org/en/v1.x/threadpool.html#c.uv_queue_work)
+for adding user work requests to the pool as well.  However, `libuv` does
+not provide mechanisms for running initialization or finalization steps in
+the threadpool.  It also doesn't direct access to the push operation, but
+rather exposes a more limited API that also has a callback to the loop
+thread.  This means that we can't string together a sequence of smaller
+tasks to run in worker threads without regularly interupting the main loop
+thread.
+
+Very few of underlying lib UV types are designed for concurrent access
+by multiple threads.  All `lean-libuv` loops, handles and requests may
+not be shared between Lean tasks, and creating a Lean task over a
+closure that contains a `lean-libuv` type will result in a runtime
+error.  We eventually plan to address this through a single-threaded
+monad.
+
+We will address these limitations in a future update with a Lean
+specific work queue.
 
 ## Memory Layout
 
@@ -108,9 +147,3 @@ once `uv_listen` is invoked.  To work around this, we have an explicit
 LibUV does not provide a function to see if a handle has been closed, so we set
 the stream handle loop field to null if the stream has fully closed, but not freed.
 The finalize procedure for a stream must detect this and free the object.
-
-## Limitations
-
-We do not allow any of the `lean-libuv` types to be shared between Lean
-tasks.  All libuv types should be accessed in a single thread, and attempting
-to reference LibUV types from multiple tasks will result in a runtime error.

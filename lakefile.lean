@@ -9,26 +9,26 @@ package LibUV where
 module_data alloy.c.o : BuildJob FilePath
 
 def flushError (msg : String) : IO Unit := do
-  let stderr ← IO.getStdout
+  let stderr ← IO.getStderr
   stderr.putStr msg
   stderr.flush
-
 
 def fatalError (msg : String) (u : UInt8) : IO α := do
   flushError msg
   IO.Process.exit u
 
 def runPkgConfig (args : Array String) : IO (Array String) := do
-  let mout ← (Option.some <$> (IO.Process.output { cmd := "pkg-config", args })).tryCatch (fun _ => pure none)
+  let mout ← (.ok <$> (IO.Process.output { cmd := "pkg-config", args })).tryCatch (pure ∘ Except.error)
   match mout with
-  | Option.none =>
+  | .error _ =>
     flushError "Cannot run pkg-config"
     pure #[]
-  | Option.some out =>
+  | .ok out =>
     if out.exitCode = 0 then
       return out.stdout.splitOn.toArray.map String.trimRight
     else
       flushError "pkg-config failed"
+      --IO.Process.exit 1
       pure #[]
 
 def pkgConfigCFlags (lib : String) : IO (Array String) := runPkgConfig #["--cflags", lib]
