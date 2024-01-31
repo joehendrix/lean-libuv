@@ -1,9 +1,10 @@
 #include <lean/lean.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <uv.h>
 
 __attribute__((noreturn))
-void fatal_error(const char *format, ...) {
+static void fatal_error(const char *format, ...) {
   va_list args;
   va_start(args, format);
   vfprintf(stderr, format, args);
@@ -113,7 +114,7 @@ void lean_uv_check_st(lean_object* o) {
 }
 
 __attribute__((noreturn))
-void fatal_st_only(const char *name) {
+static void fatal_st_only(const char *name) {
   fatal_error("%s cannot be made multi-threaded or persistent.", name);
 }
 

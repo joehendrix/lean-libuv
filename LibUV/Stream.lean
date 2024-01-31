@@ -1,8 +1,7 @@
 import LibUV.Loop
 
 open scoped Alloy.C
-alloy c include <stdlib.h> <lean_uv.h>
-
+alloy c include <stdlib.h> <string.h> <lean_uv.h>
 section NonemptyProp
 
 

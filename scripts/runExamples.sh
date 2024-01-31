@@ -2,8 +2,15 @@
 lake build
 
 search_dir=/the/path/to/base/dir
-dylibs=""
-for entry in "build/lib"/*.dylib;
+if [[ "$OSTYPE" == "darwin"* ]]; then
+  dsoext=.dylib
+else
+  dsoext=.so
+fi
+
+
+dynlibs=""
+for entry in ".lake/build/lib"/*$dsoext
 do
   dylibs+=" --load-dynlib=$entry"
 done
