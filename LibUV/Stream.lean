@@ -4,7 +4,6 @@ open scoped Alloy.C
 alloy c include <stdlib.h> <string.h> <lean_uv.h>
 section NonemptyProp
 
-
 def NonemptyProp := Subtype fun α : Prop => Nonempty α
 
 instance : Inhabited NonemptyProp := ⟨⟨PUnit, ⟨⟨⟩⟩⟩⟩
