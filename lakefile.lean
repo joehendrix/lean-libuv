@@ -6,7 +6,8 @@ require alloy from git "https://github.com/tydeu/lean4-alloy.git"
 package LibUV where
   -- add package configuration options here
 
-module_data alloy.c.o : BuildJob FilePath
+module_data alloy.c.o.export : BuildJob FilePath
+module_data alloy.c.o.noexport : BuildJob FilePath
 
 open Lean.Elab.Term
 open Lean.Elab
@@ -73,6 +74,10 @@ def elabLibUVLibs : Lean.Elab.Term.TermElab := fun stx _expectedType? =>
 @[default_target]
 lean_lib LibUV where
   precompileModules := true
-  nativeFacets := #[Module.oFacet, `alloy.c.o]
+  nativeFacets := fun shouldExport =>
+    if shouldExport then
+      #[Module.oExportFacet, `alloy.c.o.export]
+    else
+      #[Module.oNoExportFacet, `alloy.c.o.noexport]
   moreLeancArgs := #["-fPIC", s!"-I{pkgRelPath "include"}"] ++ libuvCFlags
   moreLinkArgs  := libuvLibs
