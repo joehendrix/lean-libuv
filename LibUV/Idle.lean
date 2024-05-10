@@ -34,10 +34,9 @@ static void idle_invoke_callback(uv_idle_t* idle) {
 
 end
 
-alloy c opaque_extern_type Idle => lean_uv_idle_t := {
-  foreach := `Idle_foreach
-  finalize := `Idle_finalize
-}
+alloy c opaque_extern_type Idle => lean_uv_idle_t where
+  foreach => "Idle_foreach"
+  finalize => "Idle_finalize"
 
 alloy c extern "lean_uv_idle_init"
 def Loop.mkIdle (loop : Loop) : UV.IO Idle := {

@@ -104,7 +104,7 @@ These always represent program bugs.  The function condition could have
 been checked beforehand.
 -/
 @[export lean_uv_raise_invalid_argument]
-private def raiseInvalidArgument (message:String) : UV.IO α :=
+private def raiseInvalidArgument (_: String) : UV.IO α :=
   throw (.errorcode ErrorCode.EINVAL)
 
 alloy c section
@@ -190,10 +190,10 @@ static void Loop_foreach(void* ptr, b_lean_obj_arg f) {
 
 end
 
-alloy c opaque_extern_type Loop => lean_uv_loop_t := {
-  foreach := `Loop_foreach
-  finalize := `Loop_finalize
-}
+alloy c opaque_extern_type Loop => lean_uv_loop_t where
+  foreach => "Loop_foreach"
+  finalize => "Loop_finalize"
+
 
 /--
 Options to control configure Loop at startup.

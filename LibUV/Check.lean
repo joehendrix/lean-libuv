@@ -24,10 +24,9 @@ static void check_invoke_callback(uv_check_t* check) {  // Get callback and hand
 }
 end
 
-alloy c opaque_extern_type Check => lean_uv_check_t := {
-  foreach  := `Check_foreach
-  finalize := `Check_finalize
-}
+alloy c opaque_extern_type Check => lean_uv_check_t where
+  foreach  => "Check_foreach"
+  finalize => "Check_finalize"
 
 alloy c extern "lean_uv_check_init"
 def Loop.mkCheck (loop : Loop) : UV.IO Check := {

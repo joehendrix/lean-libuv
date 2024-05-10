@@ -4,7 +4,6 @@ open scoped Alloy.C
 alloy c include <stdlib.h> <string.h> <lean_uv.h>
 section NonemptyProp
 
-
 def NonemptyProp := Subtype fun α : Prop => Nonempty α
 
 instance : Inhabited NonemptyProp := ⟨⟨PUnit, ⟨⟨⟩⟩⟩⟩
@@ -569,10 +568,9 @@ end
 /--
 A IPV4 or IPv6 socket address
 -/
-alloy c opaque_extern_type SockAddr => struct sockaddr := {
-  foreach  := `SockAddr_foreach
-  finalize := `SockAddr_finalize
-}
+alloy c opaque_extern_type SockAddr => struct sockaddr where
+  foreach  => "SockAddr_foreach"
+  finalize => "SockAddr_finalize"
 
 namespace SockAddr
 
@@ -639,10 +637,9 @@ static void TCP_finalize(void* ptr) {
 
 end
 
-alloy c opaque_extern_type TCP => uv_tcp_t := {
-  foreach  := `TCP_foreach
-  finalize := `TCP_finalize
-}
+alloy c opaque_extern_type TCP => uv_tcp_t where
+  foreach  => "TCP_foreach"
+  finalize => "TCP_finalize"
 
 alloy c extern "lean_uv_tcp_init"
 def Loop.mkTCP (loop : Loop) : BaseIO TCP := {

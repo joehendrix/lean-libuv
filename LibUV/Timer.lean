@@ -23,10 +23,10 @@ static void timer_callback(uv_timer_t* timer) {
 }
 end
 
-alloy c opaque_extern_type Timer => lean_uv_timer_t := {
-  foreach  := `Timer_foreach
-  finalize := `Timer_finalize
-}
+alloy c opaque_extern_type Timer => lean_uv_timer_t where
+  foreach  => "Timer_foreach"
+  finalize => "Timer_finalize"
+
 
 alloy c extern "lean_uv_timer_init"
 def Loop.mkTimer (loop : Loop) : UV.IO Timer := {

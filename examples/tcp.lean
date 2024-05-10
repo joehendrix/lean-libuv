@@ -10,7 +10,7 @@ def UV.TCP.readString (socket : UV.TCP) (eof : UV.IO Unit) (read : String → UV
     | .error e => throw (.errorcode e)
     | .eof => eof
     | .ok bytes =>
-      let cmd := String.fromUTF8Unchecked bytes
+      let cmd := String.fromUTF8! bytes
       read cmd
 
 def UV.TCP.writeString (socket : UV.TCP) (msg : String) (next : UV.IO Unit): UV.IO Unit := do
